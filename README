@@ -1,0 +1,25 @@
+ReadMe for test ls -l command
+
+first create a raw file system image by command
+# dd if=/dev/zero of=ext2-fs bs=1024 count=20000
+
+here ext2-fs is the name of virtual file system.
+
+now format it to ext2 fs by command
+# mkfs.ext2 ext2-fs 
+
+check the fs information by command
+# dumpe2fs ext2-fs
+
+mount the fs by command
+# sudo mount ext2-fs /mnt/
+
+create files and directories at /mnt
+unmount the fs by command
+# sudo umount /mnt
+
+now compile the source file ls_program.c by command
+# gcc ls_program.c
+
+check the ls -l implementation by command
+# ./a.out PATH/TO/FSIMAGE filename
