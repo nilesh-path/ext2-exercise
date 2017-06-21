@@ -8,10 +8,11 @@
 #include <pwd.h>
 #define KBLU  "\x1B[34m"
 #define KNRM  "\x1B[0m"
-#define DEBUG
+//#define DEBUG
 
 int f,count=0,block_size=0,first_block_bitmap_id=0,second_block_bitmap_id=0,third_block_bitmap_id=0;
-char but[1025];
+__u8 but[1025];
+__u8 inode_bitmap[3*1024]={0};
 int reserve_inode,Pdir_inode,size = 0;
 int inode_table[5];
 struct ext2_super_block es;
@@ -57,7 +58,7 @@ void print_gdiscriptor(struct ext2_group_desc gdis)
 
 void print_inode(struct ext2_inode inode)
 {
-#ifdef DEBUG
+//#ifdef DEBUG
         printf("i_mode = %x\n",inode.i_mode);
         printf("i_uid = %x\n",inode.i_uid);
         printf("i_size = %x\n",inode.i_size);
@@ -77,7 +78,7 @@ void print_inode(struct ext2_inode inode)
         printf("5 i_block = %x\n",inode.i_block[12]);
         printf("6 i_block = %x\n",inode.i_block[13]);
 
-#endif
+//#endif
 }
 
 void print_dir_data_block()
@@ -97,6 +98,8 @@ int soffset=0;
 //	count+=sizeof(dentry);
 	if(!dentry.inode)
 	break;
+        if(!validate_inode(dentry.inode))
+        break;
 
 	lseek(f, inode_table[(dentry.inode-1)/es.s_inodes_per_group]*block_size, SEEK_SET);
 //	soffset = lseek(f, 0, SEEK_CUR);
@@ -132,6 +135,7 @@ int soffset=0;
 	memcpy(&fname, &but[count+sizeof(dentry)], dentry.name_len);
 	fname[dentry.name_len] = '\0';
 
+	printf("file name is %s",fname);
       dinode[dcount]=dentry.inode;
       strcpy(dirlist[dcount],fname);
       memcpy(&inodelist[dcount], &inode, sizeof(inode));
@@ -142,6 +146,7 @@ int soffset=0;
 //	count+=dentry.name_len;
 //	count = count + ( 4 - (count % 4));
 	count+=dentry.rec_len;
+	printf("dentry count is %d\n",count);
 	}
 }
 
@@ -149,31 +154,50 @@ int soffset=0;
 int print_block_group(int bitmap_id)
 {
 int loop,inode_offset=0,offset=0;
-//#ifdef DEBUG
+#ifdef DEBUG
 	printf("Reading block bitmap block\n");
-//#endif
+#endif
 	offset = lseek(f, block_size * (bitmap_id), SEEK_SET);
 
         read(f, but, 1024);
 
         count = 0;
 
-//#ifdef DEBUG
+#ifdef DEBUG
 	do{
         memcpy(&size, &but[count], 4);
         printf("block_bitmap = %x\n",size);
 	count+=4;
 	}
 	while(size);
-//#endif
+#endif
 
-//#ifdef DEBUG
+#ifdef DEBUG
 	printf("Reading inode bitmap block\n");
-//#endif
+#endif
 
         read(f, but, 1024);
 
         count = 0;
+
+	if(inode_bitmap[0])
+	{
+	if(inode_bitmap[1024])
+	{
+	printf("copying bitmap at 1024*2 %d\n",but[0]);
+	memcpy(&inode_bitmap[1024*2], &but[0], 1024);
+	}
+	else
+	{
+	printf("copying bitmap at 1024 %d\n",but[0]);
+	memcpy(&inode_bitmap[1024], &but[0], 1024);
+	}
+	}
+	else
+	{
+	printf("copying bitmap at 0 %d\n",but[0]);
+	memcpy(&inode_bitmap, &but[0], 1024);
+	}
 
 //#ifdef DEBUG
         do{
@@ -228,13 +252,13 @@ int loop,inode_offset=0,offset=0;
         count = 0;
 	if(inode.i_mode & 0x4000)
 	{
-	count = 0;
-        do{
-        memcpy(&size, &but[count], 4);
-        printf("%d databocks = %x\n",count,size);
-        count+=4;
-        }
-        while(count<50);
+//	count = 0;
+//        do{
+//        memcpy(&size, &but[count], 4);
+//        printf("%d databocks = %x\n",count,size);
+//        count+=4;
+//        }
+//        while(count<50);
 
 
 	print_dir_data_block();
@@ -288,6 +312,7 @@ int list_files(char *file_name,int f_inode)
 {
 dcount = 0;
 fcount = 0;
+	printf("in list files\n");
 
 	lseek(f, inode_table[(f_inode-1)/es.s_inodes_per_group]*block_size, SEEK_SET);
 	lseek(f, ((f_inode % es.s_inodes_per_group)-1) * 128, SEEK_CUR);
@@ -303,6 +328,7 @@ fcount = 0;
 
 	while(dcount--)
 	{
+	printf("dirlist name = %s\t",dirlist[dcount]);
 	if(print_imode)
 	{
 //	printf("imode = %x\t",inodelist[dcount].i_mode);
@@ -313,8 +339,11 @@ fcount = 0;
 	printf("%s", KNRM);
 //	print_f_permissions(inodelist[dcount]);
 	}
-	if((file_name)&&(!strcmp(dirlist[dcount], file_name)))
+//	if((file_name)&&(!strcmp(dirlist[dcount], file_name)))
+	if(file_name)
 	{
+	printf("compare %s, %s = %d",dirlist[dcount],file_name,strcmp(dirlist[dcount], file_name));
+	if(!strcmp(dirlist[dcount], file_name))
 	if(inodelist[dcount].i_mode & 0x4000)
 	{
 
@@ -328,13 +357,14 @@ fcount = 0;
 	else
 	{
 		printf("%s\t",file_name);
-//		print_f_permissions(inodelist[dcount]);
+		print_f_permissions(inodelist[dcount]);
 		if(!s_inode.i_mode)
 		s_inode = inodelist[dcount];
 		else
 		t_inode = inodelist[dcount];
 		return 0;
 	}
+
 	}
 	}
 	if(!file_name)
@@ -342,11 +372,38 @@ fcount = 0;
 return -1;
 }
 
+int validate_inode(int inode_no)
+{
+int index = 0,i_count=0;
+if(inode_no > es.s_inodes_count)
+return 0;
+i_count = inode_no % es.s_inodes_per_group;
+printf("i_count = %d\n",i_count);
+printf("inode_no = %d\n",inode_no);
+index = ( inode_no / es.s_inodes_per_group ) * 1024;
+printf("index = %d * 1024 = %d\n",inode_no / es.s_inodes_per_group,index);
+printf("bitmap index %d\n",(index + (i_count / 8) - 1 ));
+printf("last bitmap %x\n",inode_bitmap[index + (i_count / 8) - 1 ]);
+printf("last bitmap %x\n",inode_bitmap[index + (i_count / 8)]);
+if(inode_bitmap[index + (i_count / 8)] & ( 0x1 << (i_count % 8)))
+printf("already allocated\n");
+return 1;
+}
+
 void create_dentry(void)
 {
 int temp_offset=0,loop=0;
 count = 0;
 
+if(!t_dir_dblock)
+{
+lseek(f, inode_table[0] * block_size + 128, SEEK_SET);
+read(f,&inode,128);
+t_dir_dblock = inode.i_block[0];
+}
+
+/*	print target directory entries for referance	*/
+printf("Target dir block is %d\n",t_dir_dblock);
 temp_offset=lseek(f, t_dir_dblock * block_size, SEEK_SET);
 read(f, but, 1024);
         while(1)
@@ -354,7 +411,9 @@ read(f, but, 1024);
         printf("count = %d\n",count);
         memcpy(&dentry, &but[count], sizeof(dentry));
 //        count+=sizeof(dentry);
-        if(!dentry.inode)
+	if(!dentry.inode)
+	break;
+        if(!validate_inode(dentry.inode))
         break;
         printf("inode no. = %d\n",dentry.inode);
         printf("rec_len = %d\n",dentry.rec_len);
@@ -364,12 +423,18 @@ read(f, but, 1024);
         count+=dentry.rec_len;
 //        count+=dentry.name_len;
 //        count = count + ( 4 - (count % 4));
-
+	if((count+sizeof(dentry)+20)>1024)
+	{
+	printf("offset = %d - %d",temp_offset, lseek(f,(count - 1024), SEEK_CUR));
+	read(f, but, 1024);
+	count = 0;
+	printf("reading next block for dentry\n");
         }
-
+	}
+temp_offset += count;
 count=0;
 printf("in create_dentry\n");
-temp_offset=lseek(f, t_dir_dblock * block_size, SEEK_SET);
+lseek(f, t_dir_dblock * block_size, SEEK_SET);
 read(f, but, 1024);
         while(1)
         {
@@ -377,25 +442,39 @@ read(f, but, 1024);
 //        count+=sizeof(dentry);
         if(!dentry.inode)
         break;
+        if(!validate_inode(dentry.inode))
+        break;
         count+=dentry.rec_len;
 //      count = count + ( 4 - (count % 4));
+        if((count+sizeof(dentry)+20)>1024)
+        {
+        lseek(f,(count - 1024), SEEK_CUR);
+        read(f, but, 1024);
+	count = 0;
+	printf("reading 2 next block for dentry\n");
         }
-lseek(f, temp_offset + count, SEEK_SET);
+        }
+        lseek(f,(count - 1024), SEEK_CUR);
 
-                for(loop=0;loop<sizeof(search_fname);loop++)
-                if(search_fname[loop]=='\0') break;
+	/* calculate file name length */
+        for(loop=0;loop<sizeof(search_fname);loop++)
+        if(search_fname[loop]=='\0') break;
+	printf("fname length = %d\n",loop);
 
-printf("fname length = %d\n",loop);
+/* create new denrty structure */
 dentry.inode = target_inode;
 dentry.rec_len = sizeof(dentry)+loop+1;
 dentry.name_len = loop;
 dentry.file_type = 1; 
 
+/* copy dentry in but[] for writting */
 memcpy(&but[0],&dentry,sizeof(dentry));
 memcpy(&but[sizeof(dentry)],search_fname,loop);
 
 //for(loop=0;loop<dentry.rec_len;loop+=4)
 //printf("dentry =%x\n",but[loop]);
+
+/* print new dentry for referance */
 loop = 0;
 do{
 memcpy(&size, &but[loop], 4);
@@ -404,17 +483,21 @@ loop+=4;
 }
 while(loop<dentry.rec_len);
 
-write(f,but[0],dentry.rec_len);
+/* write the dentry */
+lseek(f, temp_offset, SEEK_SET);
+write(f,&but[0],dentry.rec_len);
 
 count=0;
-temp_offset=lseek(f, t_dir_dblock * block_size, SEEK_SET);
-read(f, but, 5*1024);
+lseek(f, t_dir_dblock * block_size, SEEK_SET);
+read(f, but, 1024);
         while(1)
         {
 	printf("count = %d\n",count);
         memcpy(&dentry, &but[count], sizeof(dentry));
 //      count+=sizeof(dentry);
         if(!dentry.inode)
+        break;
+        if(!validate_inode(dentry.inode))
         break;
         printf("inode no. = %d\n",dentry.inode);
         printf("rec_len = %d\n",dentry.rec_len);
@@ -423,7 +506,14 @@ read(f, but, 5*1024);
 
         count+=dentry.rec_len;
 //        count = count + ( 4 - (count % 4));
-	
+        if((count+sizeof(dentry)+20)>1024)
+        {
+        lseek(f,(count - 1024), SEEK_CUR);
+        read(f, but, 1024);
+        count = 0;
+	printf("reading next block for dentry\n");
+        }
+
         }
 
 }
@@ -434,15 +524,15 @@ char but2[1024];
 printf("in rewrite dblock\n");
 printf("offset = %ld\n",lseek(f, block_size * s_inode.i_block[0], SEEK_SET));
 read(f, but, 1024);
-printf("data %x%x%x%x\n",but[11],but[12],but[13],but[14]);
-printf("offset = %ld\n",lseek(f, block_size * target_dblock, SEEK_SET));
+printf("data %x%x%x%x\n",but[12],but[13],but[14],but[15]);
+printf("offset = %ld\n",lseek(f, block_size * t_inode.i_block[0], SEEK_SET));
 read(f, but2, 1024);
 printf("data %x%x%x%x\n",but2[11],but2[12],but2[13],but2[14]);
 printf("offset = %ld\n",lseek(f, -1024, SEEK_CUR));
 write(f, but, 1024);
 printf("offset = %ld\n",lseek(f, -1024, SEEK_CUR));
-read(f, but, 1024);
-printf("data %x%x%x%x\n",but[11],but[12],but[13],but[14]);
+read(f, but2, 1024);
+printf("data %x%x%x%x\n",but2[12],but2[13],but2[14],but2[15]);
 printf("data block copied\n");
 }
 
@@ -455,15 +545,20 @@ read(f, but, 1024);
 count = 0;
 
 do{
-printf("block_bitmap = %x\n",but[count++]);
+printf("block_bitmap[%d] = %x\n",count,but[count]);
 }
-while((__u8)but[count]==0xff);
-
-printf("count %d\n",count);
+while((__u8)but[count++]==0xff);
+count--;
+printf("count %d = %x\n",count,but[count]);
+printf("count+1 %d = %x\n",count+1,but[count+1]);
 target_dblock = ((count) * 8) ;
 for(loop=0;loop<8;loop++)
 if(!((__u8)but[count]&(1<<loop)))
 break;
+but[count] |= (0x1 << loop);
+
+lseek(f, -1024, SEEK_CUR);
+write(f, but, 1024);
 printf("loop = %d\n",loop);
 target_dblock += loop + 1 + es.s_blocks_per_group;
 printf("in allocate dblock %d\n",target_dblock);
@@ -472,13 +567,22 @@ loop=0;
 //lseek(f, inode_table[0]*block_size, SEEK_SET);
 //printf("offset = %d\n",lseek(f, (block_size * -2), SEEK_CUR));
 read(f, but, 1024);
-count = 0;
+count = 1;
         
-do{
-printf("inode_bitmap = %x\n",but[count++]);
-}
-while((__u8)but[count]==0xff);
+//do{
+//printf("inode_bitmap = %x\n",but[count]);
+//}
+//while((__u8)but[count++]==0xff);
 
+while((__u8)but[count]==0xff)
+{
+printf("inode_bitmap = %x\n",but[count]);
+count++;
+}
+printf("to be last bitmap %x\n",but[count-1]);
+printf("to be last bitmap %x\n",but[count]);
+printf("to be last bitmap %x\n",but[count+1]);
+//count--;
 printf("count %d\n",count);
 target_inode = (count) * 8;
 for(loop=0;loop<8;loop++)
@@ -486,18 +590,34 @@ if(!(but[count]&(1<<loop)))
 break;
 target_inode += loop + 1 + es.s_inodes_per_group;
 printf("in allocate inode %d\n",target_inode);
+printf("read last bitmap %x\n",but[count]);
+//(__u8)but[count] = (__u8)but[count] | (__u8)((__u8)0x1 << (__u8)loop);
+but[count] |= (0x1 << (__u8)loop);
+printf("write last bitmap %x\n",but[count]);
+
+lseek(f, -1024, SEEK_CUR);
+write(f, but, 1024);
+
+memcpy(&t_inode, &s_inode, sizeof(s_inode));
+lseek(f, inode_table[1]*block_size, SEEK_SET);
+lseek(f, ((target_inode % es.s_inodes_per_group) -1) * 128, SEEK_CUR);
+t_inode.i_atime = time(NULL);
+t_inode.i_ctime = t_inode.i_atime + 2;
+t_inode.i_mtime = t_inode.i_atime + 2;
+t_inode.i_block[0] = target_dblock;
+printf("create time = %x\n",t_inode.i_atime);
+write(f,&t_inode,128);
 
 rewrite_dblock();
 
-lseek(f, inode_table[0]*block_size, SEEK_SET);
-lseek(f, (target_inode-1) * 128, SEEK_CUR);
-s_inode.i_atime = time(NULL);
-s_inode.i_ctime = s_inode.i_atime;
-s_inode.i_mtime = s_inode.i_atime;
-s_inode.i_block[0] = target_dblock;
-write(f,&s_inode,128);
-
-
+        lseek(f, inode_table[1]*block_size, SEEK_SET);
+        lseek(f, ((target_inode)-2) * 128, SEEK_CUR);
+        read(f, but, 2*128);
+        memcpy(&inode, &but[0], sizeof(inode));
+	print_inode(inode);
+        memcpy(&inode, &but[128], sizeof(inode));
+	print_inode(inode);
+printf("Inode and data block created\n");
 }
 
 int main(int argc, char *argv[])
@@ -505,8 +625,13 @@ int main(int argc, char *argv[])
 int loop,inode_offset=0,result=0;
 char regular_file[50],tmp_file[50],*tmp2_file;
 
+        if(argc < 2)
+        {
+        printf("please mention the filesystem file\n");
+        return 0;
+        }
 
-        f = open("/home/nilesh.tekale/exercise/sampleext2", O_RDWR);
+        f = open(argv[1], O_RDWR);
         read(f, but, 1024);
 
 #ifdef DEBUG
@@ -616,14 +741,14 @@ char regular_file[50],tmp_file[50],*tmp2_file;
 //        }
 //        }
 
-	if(argc != 3)
+	if(argc < 4)
 	{
-	printf("arguments are incomplete!!!\n");
+	printf("Please mention target file name!!\n");
 	return 0;
 	}
-	if(argc > 1)
+	if(argc > 2)
 	{
-	strcpy(tmp_file,argv[1]);
+	strcpy(tmp_file,argv[2]);
 	tmp2_file = strtok(tmp_file,"/");
 	while(tmp2_file)
 	{
@@ -634,12 +759,12 @@ char regular_file[50],tmp_file[50],*tmp2_file;
 	}
 	}
 
-	if(argc < 2)
+	if(argc < 3)
 	search_fname = NULL;
 	else
 	{
-	strcpy(regular_file,argv[1]);
-        search_fname = strtok(argv[1],"/");
+	strcpy(regular_file,argv[2]);
+        search_fname = strtok(argv[2],"/");
 	}
 check_file_exist:
 	search_finode = 2;
@@ -650,6 +775,19 @@ check_file_exist:
 	{
 		if(s_inode.i_mode)
 		{
+
+		printf("0 = %x",inode_bitmap[0]);
+		printf("1 = %x",inode_bitmap[1]);
+		printf("2 = %x",inode_bitmap[2]);
+		printf("3 = %x",inode_bitmap[3]);
+		printf("1024 = %x\n",inode_bitmap[1024]);
+		printf("1024+1 = %x\n",inode_bitmap[1024+1]);
+		printf("1024+2 = %x\n",inode_bitmap[1024+2]);
+		printf("1024+3 = %x\n",inode_bitmap[1024+3]);
+		printf("(1024 * 2) + 0 = %x",inode_bitmap[(1024 * 2) + 0]);
+		printf("(1024 * 2) + 1 = %x",inode_bitmap[(1024 * 2) + 1]);
+		printf("(1024 * 2) + 2 = %x",inode_bitmap[(1024 * 2) + 2]);
+		printf("(1024 * 2) + 3 = %x",inode_bitmap[(1024 * 2) + 3]);
 //		find_current_dir();
 		allocate_inode();
 //		allocate_dblock();
@@ -666,16 +804,19 @@ check_file_exist:
 	{
 		search_finode = result;
 		search_fname = strtok(NULL,"/");
+		printf("the result is positive\nnow looking for %s, %d\n",search_fname,result);
 		result = list_files(search_fname,search_finode);
         }
 	else
 	{
-		if(target_dblock)
+		printf("got file %s target_dblock = %d\n",regular_file,target_dblock);
+//		if(target_dblock)
+		if(t_inode.i_mode)	// NEED TO DO update size of file in inode
 		rewrite_dblock();
 		else
 		{
 		name_count = 0;
-	        strcpy(tmp_file,argv[2]);
+	        strcpy(tmp_file,argv[3]);
 	        tmp2_file = strtok(tmp_file,"/");
 	        while(tmp2_file)
 	        {
@@ -683,8 +824,8 @@ check_file_exist:
 	        tmp2_file = strtok(NULL,"/");
 	        }
 
-	        strcpy(regular_file,argv[2]);
-	        search_fname = strtok(argv[2],"/");
+	        strcpy(regular_file,argv[3]);
+	        search_fname = strtok(argv[3],"/");
 		goto check_file_exist;
 		}
 //		if(argc >= 2)
